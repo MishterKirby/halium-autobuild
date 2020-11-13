@@ -1,44 +1,86 @@
-# This is a basic workflow to help you get started with Actions
+#=================================================
+# Description: Build Halium using GitHub Actions
+# Lisence: MIT
+# Author: 0312birdzhang
+# Credit: https://github.com/P3TERX/Actions-OpenWrt
+#=================================================
 
-name: CI
+name: Halium Image
 
-# Controls when the action will run. Triggers the workflow on push or pull request
-# events but only for the main branch
-on:
+on: 
   push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
+    branches:
+      - hybris
+  release:
+    types: [published]
 
-# A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
-  # This workflow contains a single job called "build"
+
   build:
-    # The type of runner that the job will run on
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-16.04
 
-    # Steps represent a sequence of tasks that will be executed as part of the job
+    env:
+      DEVICE: osprey
+      ANDROID_ROOT: /home/runner/work/halium/
+
     steps:
-      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
-      - uses: actions/checkout@v2
+    - name: Checkout
+      uses: actions/checkout@master
+    
+    - name: Initialization environment
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+        openjdk-8-jdk android-tools-adb bc \
+        bison build-essential curl flex g++-multilib \
+        gcc-multilib gnupg gperf imagemagick lib32ncurses5-dev \
+        lib32readline-dev lib32z1-dev libesd0-dev liblz4-tool \
+        libncurses5-dev libsdl1.2-dev libssl-dev libwxgtk3.0-dev \
+        libxml2 libxml2-utils lzop pngcrush rsync schedtool \
+        squashfs-tools xsltproc yasm zip zlib1g-dev git
+        sudo docker rmi `docker images -q`
+        sudo rm -rf \
+          /usr/share/dotnet \
+          /etc/mysql \
+          /etc/php
+        mkdir -p ~/bin
+        wget 'https://storage.googleapis.com/git-repo-downloads/repo' -P ~/bin
+        chmod +x ~/bin/repo
+        git config --global user.name "UBports Moto G3 CI"
+        git config --global user.email "thisemaildoesnotexist@exist.com"
 
-      # Runs a single command using the runners shell
-      - name: Run a one-line script
-        run: echo Starting...
+    - name: Downloading source code
+      run: |
+        source halium.env
+        mkdir -p $ANDROID_ROOT
+        cd $ANDROID_ROOT
+        repo init -u https://github.com/Halium/android -b halium-7.1 --depth=1
+        repo sync -j8 -c --no-clone-bundle --no-tags
+    
+    - name: Clone device spec source
+      run: |
+        source halium.env
+        git clone https://github.com/MishterKirby/android_device_motorola_osprey.git $ANDROID_ROOT/device/motorola/osprey --depth=1
+        git clone https://github.com/MishterKirby/android_vendor_motorola_osprey.git $ANDROID_ROOT/vendor/motorola --depth=1
+        git clone https://github.com/MishterKirby/android_kernel_motorola_osprey.git $ANDROID_ROOT/kernel/motorola/msm8937 --depth=1
+        git clone https://android.googlesource.com/platform/external/curl.git -b android-7.1.2_r37 $ANDROID_ROOT/external/libcurl --depth=1
+        rm -rf $ANDROID_ROOT/halium/hybris-boot
+        git clone https://github.com/MishterKirby/hybris-boot -b osprey $ANDROID_ROOT/halium/hybris-boot --depth=1
 
-      # Runs a set of commands using the runners shell
-      - name: Run a multi-line script
-        run: |
-          sudo dpkg --add-architecture i386
-          sudo apt update
-          sudo apt install git gnupg flex bison gperf build-essential \
-          zip bzr curl libc6-dev libncurses5-dev:i386 x11proto-core-dev \
-          libx11-dev:i386 libreadline6-dev:i386 libgl1-mesa-glx:i386 \
-          libgl1-mesa-dev g++-multilib mingw-w64-i686-dev tofrodos \
-          python-markdown libxml2-utils xsltproc zlib1g-dev:i386 schedtool \
-          repo liblz4-tool bc lzop imagemagick libncurses5 rsync
+    - name: Build HAL
+      run: |
+        chmod +x build-hal.sh
+        bash -x build-hal.sh
+      shell: bash
 
-          mkdir halium && cd halium
-          repo init -u https://github.com/Halium/android -b halium-7.1 --depth=1
-          repo sync -c -j 16
+    - name : Upload boot image
+      uses: actions/upload-artifact@master
+      with:
+        name: hybris-boot image
+        path: /home/runner/work/halium/out/target/product/osprey/hybris-boot.img
 
+    - name : Upload system image
+      uses: actions/upload-artifact@master
+      with:
+        name: System image
+        path: /home/runner/work/halium/out/target/product/osprey/system.img
